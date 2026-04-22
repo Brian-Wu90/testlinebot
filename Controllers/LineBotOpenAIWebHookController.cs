@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 
@@ -13,20 +14,23 @@ namespace isRock.Template
 {
     public class LineBotOpenAIWebHookController : isRock.LineBot.LineWebHookControllerBase
     {
+        private readonly IConfiguration _configuration;
+
+        public LineBotOpenAIWebHookController(IConfiguration configuration)
+        {
+            _configuration = configuration;
+        }
+
         [Route("api/LineBotOpenAIWebHook")]
         [HttpPost]
         public IActionResult POST()
         {
-            const string AdminUserId = "U2963ec43d774e1a6745d9f8b56755b08"; //👉repleace it with your Admin User Id
+            var adminUserId = _configuration["LINE_ADMIN_USER_ID"] ?? "";
 
             try
             {
                 //設定ChannelAccessToken
-                this.ChannelAccessToken =
-                    Environment.GetEnvironmentVariable("LINE_CHANNEL_ACCESS_TOKEN")
-                    ?? throw new InvalidOperationException(
-                        "LINE_CHANNEL_ACCESS_TOKEN is not set."
-                    );
+                this.ChannelAccessToken = GetRequiredConfig("LINE_CHANNEL_ACCESS_TOKEN");
                 //配合Line Verify
                 if (
                     ReceivedMessage?.events?.Count() <= 0
@@ -40,7 +44,7 @@ namespace isRock.Template
                 //準備回覆訊息
                 if (LineEvent.type.ToLower() == "message" && LineEvent.message.type == "text")
                 {
-                    responseMsg = LLM.getResponse(LineEvent.message.text);
+                    responseMsg = LLM.getResponse(LineEvent.message.text, _configuration);
                 }
                 else if (LineEvent.type.ToLower() == "message")
                     responseMsg = $"收到 event : {LineEvent.type} type: {LineEvent.message.type} ";
@@ -54,26 +58,30 @@ namespace isRock.Template
             catch (Exception ex)
             {
                 //回覆訊息
-                this.PushMessage(AdminUserId, "發生錯誤:\n" + ex.Message);
+                if (!string.IsNullOrWhiteSpace(adminUserId))
+                {
+                    this.PushMessage(adminUserId, "發生錯誤:\n" + ex.Message);
+                }
                 //response OK
                 return Ok();
             }
+        }
+
+        private string GetRequiredConfig(string key)
+        {
+            var value = _configuration[key];
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException($"{key} is not set.");
+            }
+
+            return value;
         }
     }
 
     public class LLM
     {
-        static readonly string OpenAIKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") ?? "";
-
-        static readonly string GitHubModelKey =
-            Environment.GetEnvironmentVariable("GITHUB_MODELS_TOKEN") ?? "";
-
-        static readonly string AzureOpenAIEndpoint =
-            Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT") ?? "";
-        static readonly string AzureOpenAIModelName =
-            Environment.GetEnvironmentVariable("AZURE_OPENAI_MODEL_NAME") ?? "";
-        static readonly string AzureOpenAIToken =
-            Environment.GetEnvironmentVariable("AZURE_OPENAI_API_KEY") ?? "";
         const string AzureOpenAIVersion = "2023-03-15-preview"; //👉replace  it with your Azure OpenAI API Version
 
         [JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]
@@ -177,7 +185,7 @@ namespace isRock.Template
         /// </summary>
         /// <param name="Message"> User message </param>
         /// <returns></returns>
-        public static string getResponse(string Message)
+        public static string getResponse(string Message, IConfiguration configuration)
         {
             //建立要傳給 OpenAI API 的訊息內容
             var MessageBody = new
@@ -209,20 +217,35 @@ namespace isRock.Template
             };
 
             //呼叫 OpenAI API 並取得回應
-            //return CallOpenAIChatAPI(OpenAIKey, MessageBody); //👉repleace it with your OpenAI API Key
+            //return CallOpenAIChatAPI(GetRequiredConfig(configuration, "OPENAI_API_KEY"), MessageBody);
 
             //呼叫 GitHub Models API 並取得回應
-            return CallGitHubOpenAIChatAPI(GitHubModelKey, MessageBody); //👉repleace it with your GitHub Models API Key
+            return CallGitHubOpenAIChatAPI(
+                GetRequiredConfig(configuration, "GITHUB_MODELS_TOKEN"),
+                MessageBody
+            );
 
             //呼叫 Azure OpenAI API 並取得回應
             // return CallAzureOpenAIChatAPI(
-            //     AzureOpenAIEndpoint,
-            //     AzureOpenAIModelName,
-            //     AzureOpenAIToken,
+            //     GetRequiredConfig(configuration, "AZURE_OPENAI_ENDPOINT"),
+            //     GetRequiredConfig(configuration, "AZURE_OPENAI_MODEL_NAME"),
+            //     GetRequiredConfig(configuration, "AZURE_OPENAI_API_KEY"),
             //     AzureOpenAIVersion,
             //     //ref: https://learn.microsoft.com/en-us/azure/cognitive-services/openai/reference#chat-completions
             //     MessageBody
             // );
+        }
+
+        private static string GetRequiredConfig(IConfiguration configuration, string key)
+        {
+            var value = configuration[key];
+
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException($"{key} is not set.");
+            }
+
+            return value;
         }
     }
 }
