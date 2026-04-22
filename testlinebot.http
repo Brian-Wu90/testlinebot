@@ -1,0 +1,6 @@
+@testlinebot_HostAddress = http://localhost:5276
+
+GET {{testlinebot_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
